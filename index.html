@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suchanantep | Interactive Dynamic Water Simulation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #030508;
+            color: #fff;
+        }
+        #webgl-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2rem;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        header {
+            background: rgba(8, 12, 22, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 1.5rem 2rem;
+            border-radius: 16px;
+            max-width: 440px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.2rem;
+        }
+        p.subtitle {
+            font-size: 0.85rem;
+            color: #90a0c0;
+            margin-bottom: 1rem;
+        }
+        .tags {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .tag {
+            font-size: 0.75rem;
+            background: rgba(79, 172, 254, 0.15);
+            color: #4facfe;
+            border: 1px solid rgba(79, 172, 254, 0.3);
+            padding: 0.25rem 0.6rem;
+            border-radius: 20px;
+        }
+        footer {
+            background: rgba(8, 12, 22, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            color: #90a0c0;
+            align-self: flex-start;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            font-size: 0.9rem;
+            letter-spacing: 2px;
+            color: #4facfe;
+            background: rgba(3, 5, 8, 0.85);
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            border: 1px solid #4facfe;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+    </style>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+
+    <div id="loading">INITIALIZING INTERACTIVE WATER SIMULATION...</div>
+    <div id="webgl-container"></div>
+
+    <div id="ui-layer">
+        <header class="interactive">
+            <h1>SUCHANANTEP</h1>
+            <p class="subtitle">Interactive Physics & Advanced Shader Developer</p>
+            <div class="tags">
+                <span class="tag">Three.js</span>
+                <span class="tag">Dynamic Water Ripple</span>
+                <span class="tag">Physics Canvas</span>
+                <span class="tag">Custom GLSL</span>
+            </div>
+        </header>
+
+        <footer>
+            🌊 **ลากเมาส์ผ่านผิวน้ำ** เพื่อสร้างคลื่นน้ำกระเพื่อมกระจายตัว | **หมุนมุมมอง** โดยการคลิกลากพื้นที่ว่าง
+        </footer>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // --- 1. RIPPLE PHYSICS SIMULATION ENGINE (CANVAS BASED) ---
+        class RippleSimulation {
+            constructor(size = 256) {
+                this.size = size;
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = this.size;
+                this.canvas.height = this.size;
+                this.ctx = this.canvas.getContext('2d');
+
+                this.buffer1 = new Float32Array(this.size * this.size);
+                this.buffer2 = new Float32Array(this.size * this.size);
+                
+                this.texture = new THREE.CanvasTexture(this.canvas);
+                this.texture.minFilter = THREE.LinearFilter;
+                this.texture.magFilter = THREE.LinearFilter;
+
+                this.damping = 0.965; // ความก้องของคลื่น
+            }
+
+            addDrop(x, y, radius, strength) {
+                const cx = Math.floor(x * this.size);
+                const cy = Math.floor(y * this.size);
+
+                for (let iy = -radius; iy <= radius; iy++) {
+                    for (let ix = -radius; ix <= radius; ix++) {
+                        const px = cx + ix;
+                        const py = cy + iy;
+
+                        if (px >= 0 && px < this.size && py >= 0 && py < this.size) {
+                            if (ix * ix + iy * iy <= radius * radius) {
+                                const index = py * this.size + px;
+                                this.buffer1[index] += strength;
+                            }
+                        }
+                    }
+                }
+            }
+
+            update() {
+                const s = this.size;
+                const b1 = this.buffer1;
+                const b2 = this.buffer2;
+
+                // Wave Equation Propagation
+                for (let y = 1; y < s - 1; y++) {
+                    for (let x = 1; x < s - 1; x++) {
+                        const i = y * s + x;
+                        b2[i] = (
+                            b1[i - 1] +
+                            b1[i + 1] +
+                            b1[i - s] +
+                            b1[i + s]
+                        ) / 2 - b2[i];
+
+                        b2[i] *= this.damping;
+                    }
+                }
+
+                // Swap Buffers
+                this.buffer1 = b2;
+                this.buffer2 = b1;
+
+                // Render To Texture
+                const imgData = this.ctx.createImageData(s, s);
+                const data = imgData.data;
+
+                for (let i = 0; i < s * s; i++) {
+                    const val = Math.max(-128, Math.min(128, this.buffer1[i]));
+                    const pixelIndex = i * 4;
+                    const c = val + 128; // Normalizing to 0-255
+
+                    data[pixelIndex] = c;     // Height (R)
+                    data[pixelIndex + 1] = c; // Height (G)
+                    data[pixelIndex + 2] = c; // Height (B)
+                    data[pixelIndex + 3] = 255;
+                }
+
+                this.ctx.putImageData(imgData, 0, 0);
+                this.texture.needsUpdate = true;
+            }
+        }
+
+        const rippleSim = new RippleSimulation(256);
+
+        // --- 2. THREE.JS SCENE SETUP ---
+        const container = document.getElementById('webgl-container');
+        const scene = new THREE.Scene();
+        const fogColor = new THREE.Color(0x060c18);
+        scene.background = fogColor;
+        scene.fog = new THREE.FogExp2(fogColor, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 8, 16);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.01;
+        controls.minDistance = 3;
+        controls.maxDistance = 30;
+        controls.target.set(0, 2, 0);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x88aacc, 0.6);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xfff0dd, 2.5);
+        sunLight.position.set(10, 25, 15);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        scene.add(sunLight);
+
+        const rimLight = new THREE.PointLight(0x00f2fe, 5, 15);
+        rimLight.position.set(0, 4, -2);
+        scene.add(rimLight);
+
+        // --- 3. MOUNTAIN TERRAIN ---
+        const mountainUniforms = { uTime: { value: 0 } };
+        const mountainVertexShader = `
+            uniform float uTime;
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+            varying float vHeight;
+
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+            float snoise(vec2 v) {
+                const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+                vec2 i  = floor(v + dot(v, C.yy));
+                vec2 x0 = v - i + dot(i, C.xx);
+                vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+                vec4 x12 = x0.xyxy + C.xxzz;
+                x12.xy -= i1;
+                i = mod289(i);
+                vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+                vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+                m = m*m; m = m*m;
+                vec3 x = 2.0 * fract(p * C.www) - 1.0;
+                vec3 h = abs(x) - 0.5;
+                vec3 ox = floor(x + 0.5);
+                vec3 a0 = x - ox;
+                m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+                vec3 g;
+                g.x  = a0.x  * x0.x  + h.x  * x0.y;
+                g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+                return 130.0 * dot(m, g);
+            }
+
+            float fbm(vec2 st) {
+                float value = 0.0;
+                float amplitude = 1.0;
+                float frequency = 0.14;
+                for (int i = 0; i < 6; i++) {
+                    value += amplitude * abs(snoise(st * frequency));
+                    st *= 2.0;
+                    amplitude *= 0.5;
+                }
+                return value;
+            }
+
+            void main() {
+                vec3 pos = position;
+                float h = fbm(pos.xz) * 11.5;
+                float distFromCenter = length(pos.xz);
+                h *= smoothstep(1.0, 4.0, distFromCenter);
+
+                pos.y += h;
+                vHeight = pos.y;
+                vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
+                vNormal = normalMatrix * normal;
+                gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPosition, 1.0);
+            }
+        `;
+
+        const mountainFragmentShader = `
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+            varying float vHeight;
+
+            void main() {
+                vec3 valleyColor = vec3(0.04, 0.07, 0.12);
+                vec3 rockColor = vec3(0.22, 0.27, 0.35);
+                vec3 snowColor = vec3(0.9, 0.95, 1.0);
+
+                float heightFactor = smoothstep(0.5, 5.0, vHeight);
+                vec3 baseColor = mix(valleyColor, rockColor, heightFactor);
+
+                if (vHeight > 4.5) {
+                    float snowFactor = smoothstep(4.5, 7.5, vHeight);
+                    baseColor = mix(baseColor, snowColor, snowFactor);
+                }
+
+                vec3 lightDir = normalize(vec3(10.0, 25.0, 15.0));
+                float diff = max(dot(normalize(vNormal), lightDir), 0.15);
+                gl_FragColor = vec4(baseColor * diff, 1.0);
+            }
+        `;
+
+        const mountainGeo = new THREE.PlaneGeometry(60, 60, 200, 200);
+        const mountainMat = new THREE.ShaderMaterial({
+            vertexShader: mountainVertexShader,
+            fragmentShader: mountainFragmentShader,
+            uniforms: mountainUniforms,
+            side: THREE.DoubleSide
+        });
+        const mountain = new THREE.Mesh(mountainGeo, mountainMat);
+        mountain.rotation.x = -Math.PI / 2;
+        scene.add(mountain);
+
+        // --- 4. HIGHLY INTERACTIVE WATER SHADER ---
+        const waterUniforms = {
+            uTime: { value: 0 },
+            uRippleMap: { value: rippleSim.texture }
+        };
+
+        const waterVertexShader = `
+            uniform float uTime;
+            uniform sampler2D uRippleMap;
+            varying vec2 vUv;
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+
+            void main() {
+                vUv = uv;
+                vec3 pos = position;
+
+                // Ambient Ocean Waves
+                float wave = sin(pos.x * 2.5 + uTime * 2.0) * 0.03 + cos(pos.z * 2.0 + uTime * 1.5) * 0.03;
+
+                // Physics Ripple Displacement
+                float ripple = (texture2D(uRippleMap, uv).r - 0.5) * 0.8;
+
+                pos.y += wave + ripple;
+
+                vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
+
+                // Calculate Normal Offset based on Ripples
+                float pixelOffset = 1.0 / 256.0;
+                float rRight = (texture2D(uRippleMap, uv + vec2(pixelOffset, 0.0)).r - 0.5) * 0.8;
+                float rUp    = (texture2D(uRippleMap, uv + vec2(0.0, pixelOffset)).r - 0.5) * 0.8;
+
+                vec3 n = normal;
+                n.x += (ripple - rRight) * 3.0;
+                n.z += (ripple - rUp) * 3.0;
+                vNormal = normalMatrix * normalize(n);
+
+                gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPosition, 1.0);
+            }
+        `;
+
+        const waterFragmentShader = `
+            uniform sampler2D uRippleMap;
+            varying vec2 vUv;
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+
+            void main() {
+                vec3 waterDeep = vec3(0.01, 0.08, 0.18);
+                vec3 waterShallow = vec3(0.0, 0.5, 0.7);
+
+                vec3 lightDir = normalize(vec3(10.0, 25.0, 15.0));
+                vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+                vec3 halfDir = normalize(lightDir + viewDir);
+
+                float diff = max(dot(vNormal, lightDir), 0.2);
+                float spec = pow(max(dot(vNormal, halfDir), 0.0), 128.0) * 2.0;
+
+                float fresnel = pow(1.0 - max(dot(viewDir, vNormal), 0.0), 3.0);
+                vec3 waterColor = mix(waterDeep, waterShallow, fresnel * 0.7);
+
+                // Add Highlight to Active Ripples
+                float ripple = abs(texture2D(uRippleMap, vUv).r - 0.5);
+                vec3 rippleGlow = vec3(0.0, 0.9, 1.0) * ripple * 2.0;
+
+                vec3 finalColor = waterColor * diff + vec3(spec) + rippleGlow;
+                gl_FragColor = vec4(finalColor, 0.88);
+            }
+        `;
+
+        const waterGeo = new THREE.CircleGeometry(12, 256);
+        const waterMat = new THREE.ShaderMaterial({
+            vertexShader: waterVertexShader,
+            fragmentShader: waterFragmentShader,
+            uniforms: waterUniforms,
+            transparent: true,
+            side: THREE.DoubleSide
+        });
+        const water = new THREE.Mesh(waterGeo, waterMat);
+        water.rotation.x = -Math.PI / 2;
+        water.position.y = 0.6;
+        scene.add(water);
+
+        // --- 5. PEDESTAL & 3D MODEL ---
+        const pedestalGeo = new THREE.CylinderGeometry(1.5, 1.8, 1.0, 32);
+        const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x1a2230, roughness: 0.3, metalness: 0.8 });
+        const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
+        pedestal.position.set(0, 0.7, 0);
+        scene.add(pedestal);
+
+        const loadingEl = document.getElementById('loading');
+        const loader = new GLTFLoader();
+        
+        loader.load(
+            'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb',
+            (gltf) => {
+                const model = gltf.scene;
+                model.position.set(0, 2.0, 0);
+                model.scale.set(1.1, 1.1, 1.1);
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                scene.add(model);
+
+                loadingEl.style.opacity = '0';
+                setTimeout(() => loadingEl.remove(), 500);
+            },
+            (xhr) => {
+                if (xhr.total > 0) {
+                    const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                    loadingEl.innerText = `LOADING 3D MODEL: ${percent}%`;
+                }
+            },
+            () => {
+                loadingEl.innerText = 'READY (SCENE LOADED)';
+                setTimeout(() => loadingEl.remove(), 1000);
+            }
+        );
+
+        // --- 6. RAYCASTING MOUSE WATER INTERACTION ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(-999, -999);
+        let prevUv = null;
+
+        window.addEventListener('pointermove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(water);
+
+            if (intersects.length > 0) {
+                controls.enabled = false; // ปิด OrbitControls เมื่อลากเมาส์บนผิวน้ำ
+                const uv = intersects[0].uv;
+
+                // เพิ่มคลื่นกระเพื่อมตามตำแหน่งเมาส์
+                rippleSim.addDrop(uv.x, uv.y, 4, 120);
+
+                prevUv = uv;
+            } else {
+                controls.enabled = true; // เปิด OrbitControls เมื่อเมาส์อยู่นอกผิวน้ำ
+            }
+        });
+
+        // --- RESIZE HANDLER ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+
+            // Physics Update Every Frame
+            rippleSim.update();
+
+            mountainUniforms.uTime.value = elapsedTime;
+            waterUniforms.uTime.value = elapsedTime;
+
+            rimLight.position.x = Math.sin(elapsedTime * 0.8) * 4;
+            rimLight.position.z = Math.cos(elapsedTime * 0.8) * 4;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
