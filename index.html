@@ -1,0 +1,55 @@
+!DOCTYPE html
+html lang=th
+head
+  meta charset=UTF-8
+  meta name=viewport content=width=device-width, initial-scale=1.0
+  titleAR.js 3D Model with Markertitle
+  
+  !-- A-Frame Library --
+  script src=httpsaframe.ioreleases1.3.0aframe.min.jsscript
+  
+  !-- AR.js for A-Frame --
+  script src=httpsraw.githack.comAR-js-orgAR.jsmasteraframebuildaframe-ar.jsscript
+  
+  !-- A-Frame Extras (สำหรับการเล่น Animation ของ 3D Model) --
+  script src=httpscdn.jsdelivr.netghdonmccurdyaframe-extras@v6.1.1distaframe-extras.min.jsscript
+head
+
+body style=margin 0px; overflow hidden;
+
+  !-- A-Frame Scene กำหนดการใช้งาน AR.js --
+  a-scene embedded arjs=sourceType webcam; debugUIEnabled false;
+    
+    !-- โหลด Asset (3D Model) --
+    a-assets
+      a-asset-item id=epona-model src=httpssuchanantep.github.ioepona.glba-asset-item
+    a-assets
+
+    !-- 
+      หมายเหตุเกี่ยวกับ Custom Marker
+      AR.js จะใช้ไฟล์รูปแบบ .patt สำหรับการตรวจจับ Marker Pattern 
+      หากต้องการใช้รูป tracker.png ต้องนำรูปไปแปลงเป็นไฟล์ .patt ก่อนที่
+      httpsjeromeetienne.github.ioAR.jsthree.jsexamplesmarker-trainingexamplesgenerator.html
+      
+      ตัวอย่างด้านล่างใช้ type=pattern และอ้างอิงไปยังไฟล์ .patt (หรือเปลี่ยนเป็น type=hiro หากต้องการทดสอบเบื้องต้น)
+    --
+    a-marker type=pattern url=pathtoyourtracker.patt
+      
+      !-- แสดงผล 3D Model พร้อมสั่งเล่น Animation (animation-mixer) --
+      a-entity 
+        gltf-model=#epona-model
+        scale=0.5 0.5 0.5 
+        position=0 0 0 
+        rotation=0 0 0
+        animation-mixer
+      a-entity
+
+    a-marker
+
+    !-- กำหนด Camera ของ AR --
+    a-entity cameraa-entity
+
+  a-scene
+
+body
+html
